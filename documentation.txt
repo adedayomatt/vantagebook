@@ -1,0 +1,99 @@
+Authentication:
+Multi authentication of two was developed, one for normal user like customer and the second for vendors, ofcourse
+they would nhave different permissions, for this reason i created a new guard in config/auth.php for vendor using 
+session driver and a created provider that uses the App\Vendor eloquent. (Refer to around line 38 - 52 in config/auth.php)
+For password reset, another password broker 'vendor'was created (refer to around line 103 - 116 in config/auth.php).
+
+Regular users would be using the default guard and the default password broker while vendors would be using the 'vendor' guard and
+the 'vendors' password broker. Regular user would also be using the default 'guest' middleware registered with the class 
+App/Middleware/redirectedIfAuthenticated, so I created another middleware class App/Middleware/redirectedIfAuthenticatedVendor
+and it is registered as 'nonvendor' in the Kernel.Therefore, we can use these route middleware as follows:
+
+auth:web / auth -------------> For authenticated regular user only
+auth:vendor ---------------->For authenticated vendor alone
+guest--------------------->For everyone else asides authenticated regular user
+nonvendor ----------------->For everyone else aside authenticated vendors
+
+To achieve this multi authentication of two, the default Auth::routes which is generated on running the the artisan command make:auth was 
+ditched! so we can have our own custom URL for these different authentications. The Artisan command route:list was used to inspect the routes
+registered by the the Auth::routes after scaffolding the default authentication system, it was observed that 9 different routes were registered
+with just Auth:routes. They were registered as follow:
+
+	Route::get('login','Auth\LoginController@showLoginForm')->name('login');
+
+	Route::post('login','Auth\LoginController@login');
+
+	Route::post('logout','Auth\LoginController@logout')->name('logout');
+
+	Route::get('password/reset','Auth\ForgotPasswordController@showLinkRequestForm')->name('password.request');
+
+	Route::post('password/email','Auth\ForgotPasswordController@sendResetLinkEmail')->name('password.email');
+
+	Route::post('password/reset','Auth\ResetPasswordController@reset');
+
+	Route::get('password/reset/{token}','Auth\ResetPasswordController@showResetForm')->name('password.reset');
+
+	Route::get('register','Auth\RegisterController@showRegistrationForm')->name('register');
+
+	Route::post('register','Auth\RegisterController@register');
+
+
+This routes and controllers already takes care of logining in, registering new user with basic information, and reseting password. But the goal is
+to have this in two folds in a most organized way as possible to ease scalabilty.This require having different tables and models for our two sets
+of users, We would be using the model User and Vendor for regular user and vendor respectively. So these routes were registered with different prefix 
+for users and vendors and the names too were  modified, see routes/web.php.
+
+
+Luckily, laravel uses traits to carry out most of its authentications, Login, Register, Password Reset all uses traits that is why in a fresh laravel
+project, not much code would be seen in App/Http/Controllers/Auth/LoginController and the rest. Therefore, it was these traits that was used, all
+that was needed was to override some methods in the trait. To make this easier, Different Controllers were created for the two authentication i.e
+the user login controller was seperated from the vendor login controller but they both use the same traits. What i did was simply copy and duplicate
+all the the default controllers in App/Http/Controllers/Auth and name them accordingly. Please notice that i changed the class names as well.
+
+For Login, these are the methods overrode and reasons:
+--public function showLoginForm(): This function originally  resides in the trait at illuminate\Foundation\Auth\AuthenticatesUsers and it the method
+   that returns the view for the login form, since we would be using different login forms for the two sets of users, their route would be different,
+   so this method was overridden both in userLoginController and vendoerLoginController to return the appropraite view.
+--protected function guard(): There is also a copy of this method in the trait which returns the default guard ('web'). But recall, we have two different guard now
+   namely 'web'(default for regular users) and 'vendor' for vendors, so this function was overridden in both users controller to return their appropriate guard instances
+--protected function username(): This simply returns the column on the table the user should be authenticated with alongside the password, by default, it is email, however
+   i have plan for it later where user doesn't have to use email address only, that's why i brought it out for overriding from the trait, as at the momement, the functiion username()
+   still returns the sAME value as the one in the trait.
+-- protected function authenticated($request,$user): Whatever thing that want to be done immediately user is authenticated will be done here, $user holds the authenticated user object
+    The default function in the trait does not do anything so we can perform our own operation here. 
+This methods were overridden accordingly for VendorLoginController as well.
+
+For Registeration, the methods overrode are: 
+i. protected function guard(): By default, laravel uses the guard instance returned by guard method in the trait illuminate\Foundation\Auth\RegistersUsers, so for vendors, it has to be overridden
+   to use the vendor guard, for users, the default guard is still used.
+ii. protected function registered($request, $user): Nothing happens in this method in the trait, it's to be executed when new user is registered, so I overrode it so that we can do something when
+    a user registers, maybe send email or flash a session.
+This overriding was done for VendorRegisterController as well.
+
+For Reset of password, the classes also use traits from illuminate\Foundation\Auth , in UserResetPasswordController and VendorResetPasswordCOntroller, the following methods were overriden to 
+return their respective instances or views:
+-- public function showResetForm(): To return the corresponding views for users and vendors
+-- protected function guard(): To return the corresponding guard for users and vendors
+-- public function broker(): To return the coressponding password broker for users and vendors as defined in config/auth.php
+
+For UserForgotPasswordController and VendorForgotPasswordController, the following methods were overridden:
+--public function showLinkRequestForm(): To return the corresponding view for users and vendors
+--public function broker()
+: To return the coressponding password broker for users and vendors as defined in config/auth.php
+
+***Notice that the corresponding middleware used in these classes' constructors, 'guest' for controllers that controls users and 'nonvendor' for controllers that controls vendor.***
+
+I'm sure you would have understood why i had to redefine the authentication routes instead of using the default Auth::routes by now. Good!
+
+Another i would want to point out in this documentation is the whichever developer working on this codebase would not have much headache is the password reset email. I assume you know that by default,
+laravel does not plan for multi authentication when scafolding the authentication system, therefore the Nofication class that sends the password reset email is planned for a single authentication and this 
+class is in illuminate\Auth\Notifications\ResetPassword , you could take the liberty to check the notification class, it's even pointing to route('password.reset') that laravel would assume would have been registered 
+with Auth::route(), but remember, we have ditched that! As you know it is not a good practice to tamper with the framework basecode, and thank God alternative was provided by allowing us customize our own notification class
+for password reset email, so I created two different notification classes for both users and vendors in App\Notifications and override the public function sendPasswordResetNotification($token) in their respective models to send
+the password reset token.(please refer to https://laravel.com/docs/5.3/passwords/#password-customization for proper documentation for more info)
+
+
+Another change made to the initial Laravel setup is the AuthenticationException handler in App\Exceptions\Handler. The protected function unauthenticated() which handles redirection to login page when user is not authenticated 
+was edit to redirect users and vendors to their respective log in page. Remember they have different login pages, by default, laravel redirect all user to route('login') which Laravel expect the default Auth system would have scafoldded 
+and we already tweak that. Not much was coded here though, I only check the guard resaponsible for the page the user is trying to visit before being redirected, so i switched it so that case guard == 'web' would redirect to route('user.login') 
+and guard == 'vendor' would redirect to route('vendor.login').
