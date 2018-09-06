@@ -1,2 +1,2 @@
-# Documentation
-Please refer to https://docs.google.com/document/d/1X00aD5k_R_tKRQsBXXsPqZOkcnQFruxvbbkWqOyzW_Y/edit?usp=sharing for this project documentation
+# NOTICE
+The working repository for this project has been moved to https://github.com/TinklingDigital/vantagebook
